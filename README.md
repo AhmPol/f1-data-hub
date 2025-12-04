@@ -1,6 +1,6 @@
 # F1 Data Hub
 
-[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://blank-app-template.streamlit.app/)
+[![Open Online](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://f1-data-sub.streamlit.app/)
 
 ### How to run it on your own machine
 
