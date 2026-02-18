@@ -4,7 +4,7 @@ import fastf1
 fastf1.Cache.enable_cache("fastf1_cache")
 
 st.set_page_config(page_title="F1 Data Hub", layout="wide")
-st.title("F1 Data Hub — Data Nerd Dashboard")
+st.title("F1 Data Dashboard")
 
 from app.ui_sidebar import sidebar_controls
 from app.ui_main import load_session, render_dashboard
