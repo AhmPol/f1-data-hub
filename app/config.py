@@ -71,7 +71,7 @@ MODULE_ALLOWLIST = {
         "show_overall_laptimes", "show_all_laptimes", "show_lap_scatter",
         "show_speed_comparison", "show_speed_diff_track", "show_gear_visualizer",
         "show_stint_strategy", "show_tyre_degradation",
-        "show_sector_times", "show_telemetry_overlay",
+        "show_sector_times", "show_telemetry_overlay","show_qualifying_results", "show_team_avg",
     },
 }
 
