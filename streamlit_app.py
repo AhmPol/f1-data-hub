@@ -7,7 +7,7 @@ fastf1.Cache.enable_cache('fastf1_cache')
 
 st.title("F1 Data Interface")
 
-years = list(range(2018, 2026))
+years = list(range(2018, 2027))
 year = st.selectbox("Select Year", years)
 
 if st.button("Load Grand Prix List"):
