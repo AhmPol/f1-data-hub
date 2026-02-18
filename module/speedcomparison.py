@@ -91,14 +91,27 @@ class SpeedComparisonDriversPlotly:
         return fig
 
 
-def show_speed_comparison(session):
+def show_speed_comparison(session, key_prefix: str = ""):
     import streamlit as st
 
-    # Select drivers
     drivers = sorted(list(set(session.laps['Driver'])))
-    driver_1 = st.selectbox("Select Driver 1", drivers, key="speed_driver_1")
-    driver_2 = st.selectbox("Select Driver 2", drivers, index=1 if len(drivers) > 1 else 0, key="speed_driver_2")
+
+    driver_1 = st.selectbox(
+        "Select Driver 1",
+        drivers,
+        key=f"{key_prefix}speed_driver_1"
+    )
+
+    # default index: avoid crash if only 1 driver exists
+    default_idx = 1 if len(drivers) > 1 else 0
+    driver_2 = st.selectbox(
+        "Select Driver 2",
+        drivers,
+        index=default_idx,
+        key=f"{key_prefix}speed_driver_2"
+    )
 
     plotter = SpeedComparisonDriversPlotly(session, driver_1, driver_2)
     fig = plotter.plot()
     st.plotly_chart(fig, use_container_width=True)
+
