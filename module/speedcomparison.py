@@ -113,5 +113,6 @@ def show_speed_comparison(session, key_prefix: str = ""):
 
     plotter = SpeedComparisonDriversPlotly(session, driver_1, driver_2)
     fig = plotter.plot()
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key=f"{key_prefix}speed_comparison_chart")
+
 
