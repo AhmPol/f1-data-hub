@@ -119,5 +119,6 @@ def show_speed_diff_track(session, key_prefix: str = ""):
 
     plotter = SpeedDiffTrackMapPlotly(session, driver_1, driver_2)
     fig = plotter.plot()
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, key=f"{key_prefix}speed_diff_track_chart")
+
 
