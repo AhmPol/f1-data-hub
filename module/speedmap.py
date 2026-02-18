@@ -101,14 +101,23 @@ class SpeedDiffTrackMapPlotly:
 
         return fig
 
-def show_speed_diff_track(session):
+def show_speed_diff_track(session, key_prefix: str = ""):
     import streamlit as st
 
-    # Driver selection
     drivers = sorted(list(set(session.laps['Driver'])))
-    driver_1 = st.selectbox("Select First Driver", drivers, key='speed_diff_driver_1')
-    driver_2 = st.selectbox("Select Second Driver", drivers, key='speed_diff_driver_2')
+
+    driver_1 = st.selectbox(
+        "Select First Driver",
+        drivers,
+        key=f"{key_prefix}speed_diff_driver_1"
+    )
+    driver_2 = st.selectbox(
+        "Select Second Driver",
+        drivers,
+        key=f"{key_prefix}speed_diff_driver_2"
+    )
 
     plotter = SpeedDiffTrackMapPlotly(session, driver_1, driver_2)
     fig = plotter.plot()
     st.plotly_chart(fig, use_container_width=True)
+
