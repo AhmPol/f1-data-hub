@@ -219,7 +219,6 @@ c1.metric("Drivers", len(session.drivers))
 c2.metric("Total laps", len(laps))
 c3.metric("Quick laps", len(quicklaps))
 c4.metric("Fastest lap", str(fastest['LapTime']) if fastest is not None else "N/A")
-c5.metric("Loaded at", datetime.now().strftime("%H:%M:%S"))
 
 # -----------------------------
 # Compare mode setup
