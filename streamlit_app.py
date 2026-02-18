@@ -17,13 +17,47 @@ if st.button("Load Grand Prix List"):
 
 if 'races' in st.session_state:
     gp = st.selectbox("Select Grand Prix", st.session_state['races']['EventName'])
-    session_type = st.selectbox("Select Session", ['FP1','FP2','FP3','Q','R'])
+
+    # Grab the selected event row
+    selected_event = st.session_state['races'].loc[
+        st.session_state['races']['EventName'] == gp
+    ].iloc[0]
+
+    event_name = str(selected_event.get("EventName", ""))
+    event_format = str(selected_event.get("EventFormat", ""))
+
+    # Detect testing events
+    is_testing = ("Testing" in event_name) or ("Testing" in event_format)
+
+    if is_testing:
+        testing_session_label = st.selectbox(
+            "Select Testing Session",
+            ["Session 1", "Session 2", "Session 3"]
+        )
+        testing_session_number = int(testing_session_label.split()[-1])
+    else:
+        session_type = st.selectbox("Select Session", ['FP1', 'FP2', 'FP3', 'Q', 'R'])
+
     if st.button("Load Session"):
-        round_number = st.session_state['races'].loc[st.session_state['races']['EventName']==gp,'RoundNumber'].iloc[0]
-        session = fastf1.get_session(year, round_number, session_type)
-        session.load()
-        st.session_state['current_session'] = session
-        st.success(f"Loaded {gp} {session_type}")
+        if is_testing:
+            # Find which testing event number this is (1st test, 2nd test, etc.)
+            testing_events = st.session_state['races'][
+                st.session_state['races']['EventName'].astype(str).str.contains("Testing", na=False)
+            ].sort_values("EventDate").reset_index(drop=True)
+
+            test_number = int(testing_events[testing_events["EventName"] == gp].index[0]) + 1
+
+            session = fastf1.get_testing_session(year, test_number, testing_session_number)
+            session.load()
+            st.session_state['current_session'] = session
+            st.success(f"Loaded {gp} - Session {testing_session_number}")
+
+        else:
+            round_number = int(selected_event["RoundNumber"])
+            session = fastf1.get_session(year, round_number, session_type)
+            session.load()
+            st.session_state['current_session'] = session
+            st.success(f"Loaded {gp} {session_type}")
 
 # Load modules dynamically
 def load_modules(folder="module"):
