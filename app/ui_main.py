@@ -20,7 +20,7 @@ def load_session(year, schedule, gp_label, selected_event, is_testing, session_t
                 session.load()
                 st.session_state["current_session"] = session
                 st.session_state["session_type"] = "T"
-                st.success(f"Loaded {selected_event['EventName']} — Test {test_number}, Session {testing_session_number}")
+                st.success(f"Loaded {selected_event['EventName']} Test {test_number}, Session {testing_session_number}")
             else:
                 round_number = int(selected_event["RoundNumber"])
                 session = fastf1.get_session(year, round_number, session_type)
@@ -39,7 +39,7 @@ def load_session(year, schedule, gp_label, selected_event, is_testing, session_t
     return st.session_state["current_session"]
 
 def render_dashboard(session, is_testing, compare_mode):
-    st.subheader(f"{session.event['EventName']} {session.event.year} — {session.name}")
+    st.subheader(f"{session.event['EventName']} {session.event.year} {session.name}")
 
     laps = session.laps
     quicklaps = laps.pick_quicklaps() if laps is not None else None
