@@ -77,14 +77,23 @@ class SectorTimesPlotly:
         )
         return fig
 
-def show_sector_times(session):
+def show_sector_times(session, key_prefix: str = ""):
     drivers = sorted(list(session.laps['Driver'].unique()))
+
+    # If compare drivers exist, use them as default
+    default_drivers = drivers[:6]
+    if "compare_drivers" in st.session_state and st.session_state["compare_drivers"]:
+        default_drivers = list(st.session_state["compare_drivers"])
+
     selected_drivers = st.multiselect(
         "Select Drivers for Sector Comparison",
         options=drivers,
-        default=drivers[:6]
+        default=default_drivers,
+        key=f"{key_prefix}sector_driver_multiselect"
     )
+
     plotter = SectorTimesPlotly(session, selected_drivers)
     fig = plotter.plot()
     if fig:
         st.plotly_chart(fig, use_container_width=True)
+
