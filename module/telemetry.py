@@ -81,40 +81,51 @@ class TelemetryOverlayPlotly:
         return fig
 
 
-def show_telemetry_overlay(session):
+def show_telemetry_overlay(session, key_prefix: str = ""):
     """
     Streamlit-friendly function to display telemetry overlay.
-    Adds driver selection + channel selection.
-    Uses compare mode drivers if available in st.session_state["compare_drivers"].
+    Accepts key_prefix so it can be safely rendered in multiple tabs.
     """
-    all_drivers = sorted(list(set(session.laps["Driver"]))) if "Driver" in session.laps.columns else sorted(list(session.drivers))
+    all_drivers = (
+        sorted(list(set(session.laps["Driver"])))
+        if "Driver" in session.laps.columns
+        else sorted(list(session.drivers))
+    )
 
-    # If your dashboard stored compare drivers, use them as default
-    default_drivers = None
+    # Prefer compare drivers if available
     if "compare_drivers" in st.session_state and st.session_state["compare_drivers"]:
         default_drivers = list(st.session_state["compare_drivers"])
     else:
-        default_drivers = all_drivers[:6]  # sensible default
+        default_drivers = all_drivers[:6]
 
     telemetry_channel = st.selectbox(
         "Select Telemetry Channel",
         TelemetryOverlayPlotly.TELEMETRY_CHANNELS,
         index=0,
-        key="telemetry_channel_select",
+        key=f"{key_prefix}telemetry_channel_select",
     )
 
     selected_drivers = st.multiselect(
         "Select Drivers (fastest lap overlay)",
         options=all_drivers,
         default=default_drivers,
-        key="telemetry_driver_multiselect",
+        key=f"{key_prefix}telemetry_driver_multiselect",
     )
 
     if not selected_drivers:
         st.warning("Select at least one driver.")
         return
 
-    plotter = TelemetryOverlayPlotly(session, telemetry_channel=telemetry_channel, drivers=selected_drivers)
+    plotter = TelemetryOverlayPlotly(
+        session,
+        telemetry_channel=telemetry_channel,
+        drivers=selected_drivers
+    )
     fig = plotter.plot()
+
     if fig:
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(
+            fig,
+            use_container_width=True,
+            key=f"{key_prefix}telemetry_overlay_chart"
+        )
