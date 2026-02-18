@@ -37,8 +37,30 @@ class SpeedDiffTrackMapPlotly:
 
         # Speed difference for coloring
         speed_diff = tel1_speed - tel2_speed
-        max_diff = np.max(np.abs(speed_diff))
-        normalized_diff = speed_diff / max_diff
+        max_diff = float(np.nanmax(np.abs(speed_diff))) if len(speed_diff) else 0.0
+
+        # If max_diff is 0 (or nan), differences are basically zero → use zeros
+        if (not np.isfinite(max_diff)) or max_diff <= 1e-12:
+            normalized_diff = np.zeros_like(speed_diff, dtype=float)
+        else:
+            normalized_diff = speed_diff / max_diff
+        
+        # Clean + clamp to [-1, 1] to avoid NaN/inf breaking int()
+        normalized_diff = np.nan_to_num(normalized_diff, nan=0.0, posinf=0.0, neginf=0.0)
+        normalized_diff = np.clip(normalized_diff, -1.0, 1.0)
+        
+        def _shade(v: float) -> str:
+            # v in [-1, 1]; intensity higher near 0, lower near +/-1
+            intensity = int(255 * (0.5 + 0.5 * (1 - abs(v))))
+            intensity = max(0, min(255, intensity))
+            if v > 0:
+                return f"rgb(0,0,{intensity})"      # blue-ish
+            elif v < 0:
+                return f"rgb({intensity},0,0)"      # red-ish
+            else:
+                return "rgb(120,120,120)"          # neutral gray for equal
+        
+        colors = [_shade(float(v)) for v in normalized_diff]
 
         # Track coordinates interpolation
         x = np.interp(common_distance, tel1['Distance'], tel1['X'])
@@ -54,10 +76,6 @@ class SpeedDiffTrackMapPlotly:
             line=dict(color='lightgray', width=10),
             showlegend=False
         ))
-
-        # Add colored speed difference line
-        colors = ['rgb(0,0,{0})'.format(int(255*(0.5 + 0.5*(1-abs(v))))) if v > 0 
-                  else 'rgb({0},0,0)'.format(int(255*(0.5 + 0.5*(1-abs(v))))) for v in normalized_diff]
 
         for i in range(len(x)-1):
             fig.add_trace(go.Scatter(
@@ -120,5 +138,6 @@ def show_speed_diff_track(session, key_prefix: str = ""):
     plotter = SpeedDiffTrackMapPlotly(session, driver_1, driver_2)
     fig = plotter.plot()
     st.plotly_chart(fig, use_container_width=True, key=f"{key_prefix}speed_diff_track_chart")
+
 
 
