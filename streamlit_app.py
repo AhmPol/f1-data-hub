@@ -129,7 +129,7 @@ def session_category(session_type: str, is_testing: bool) -> str:
 # -----------------------------
 st.sidebar.header("Control Center")
 
-years = list(range(2026, 2027))
+years = list(range(2025, 2027))
 year = st.sidebar.selectbox("Year", years, index=len(years)-1)
 
 if st.sidebar.button("Load Event List"):
