@@ -4,6 +4,7 @@ import os
 import importlib.util
 from datetime import datetime
 import pandas as pd
+import inspect
 
 fastf1.Cache.enable_cache("fastf1_cache")
 
@@ -50,6 +51,16 @@ def fmt_laptime(td) -> str:
     s = total - 60 * m
     return f"{m}:{s:06.3f}"
 
+def run_module(func, session, key_prefix: str):
+    """
+    Safely call modules that optionally accept key_prefix.
+    This prevents duplicate Streamlit widget keys across tabs.
+    """
+    sig = inspect.signature(func)
+    if "key_prefix" in sig.parameters:
+        return func(session, key_prefix=key_prefix)
+    return func(session)
+
 # Explanations ALWAYS ON
 EXPLAINERS = {
     "show_driver_consistency": "Lower = more consistent. Std dev of quick-lap times.",
@@ -69,18 +80,12 @@ EXPLAINERS = {
     "show_point_finishers": "Top 10 lap times over race (advanced; niche).",
 }
 
-# -----------------------------
-# Grouping / Tabs
-#   - Qualifying tab removed
-#   - Team/Driver fastest (qualifying charts) moved under Overview
-#   - Strategy tab includes stint + tyre and appears for all sessions
-#   - Race positions only shown in Race sessions
-#   - Compare gets its own tab
-# -----------------------------
+# Tabs: Qualifying removed, Advanced always present, Compare optional
 TAB_NAMES_BASE = ["Overview", "Lap Times", "Telemetry", "Strategy", "Race", "Advanced"]
 
+# Grouping
 FUNC_GROUP = {
-    # Overview (includes qualifying-derived charts too)
+    # Overview (includes qualifying charts)
     "show_driver_consistency": "Overview",
     "show_qualifying_results": "Overview",
     "show_team_avg": "Overview",
@@ -90,7 +95,7 @@ FUNC_GROUP = {
     "show_all_laptimes": "Lap Times",
     "show_lap_scatter": "Lap Times",
 
-    # Telemetry
+    # Telemetry (high signal)
     "show_speed_comparison": "Telemetry",
     "show_speed_diff_track": "Telemetry",
     "show_gear_visualizer": "Telemetry",
@@ -109,8 +114,6 @@ FUNC_GROUP = {
 }
 
 # Allowlist by session type
-# - Strategy always included
-# - Race positions only for Race
 MODULE_ALLOWLIST = {
     "Race": {
         "show_driver_consistency",
@@ -145,7 +148,7 @@ MODULE_ALLOWLIST = {
     },
 }
 
-# Compare tab = only comparison-friendly graphs
+# Compare tab contents (in order)
 COMPARE_FUNCS = [
     "show_speed_comparison",
     "show_speed_diff_track",
@@ -188,9 +191,9 @@ if "races" not in st.session_state:
     st.stop()
 
 schedule = st.session_state["races"]
+
 gp_label = st.sidebar.selectbox("Grand Prix / Event", schedule["DisplayName"].tolist())
 selected_event = schedule.loc[schedule["DisplayName"] == gp_label].iloc[0]
-
 is_testing = detect_testing(selected_event)
 
 if is_testing:
@@ -200,7 +203,6 @@ if is_testing:
 else:
     session_type = st.sidebar.selectbox("Session", ["FP1", "FP2", "FP3", "Q", "R"])
 
-# Compare mode (now creates a Compare tab)
 st.sidebar.divider()
 st.sidebar.subheader("Compare")
 
@@ -225,7 +227,6 @@ if st.sidebar.button("Load Session Data"):
             st.session_state["current_session"] = session
             st.session_state["session_type"] = "T"
             st.success(f"Loaded {selected_event['EventName']} — Test {test_number}, Session {testing_session_number}")
-
         else:
             round_number = int(selected_event["RoundNumber"])
             session = fastf1.get_session(year, round_number, session_type)
@@ -233,7 +234,6 @@ if st.sidebar.button("Load Session Data"):
             st.session_state["current_session"] = session
             st.session_state["session_type"] = session_type
             st.success(f"Loaded {selected_event['EventName']} {session_type}")
-
     except Exception as e:
         st.exception(e)
         st.stop()
@@ -264,7 +264,7 @@ c4.metric("Fastest lap", fmt_laptime(fastest["LapTime"]) if fastest is not None 
 c5.metric("Loaded at", datetime.now().strftime("%H:%M:%S"))
 
 # -----------------------------
-# Compare driver selection (preload compare module inputs)
+# Compare driver selection + preload into prefixed widget keys
 # -----------------------------
 drivers = sorted(list(set(laps["Driver"]))) if (laps is not None and "Driver" in laps.columns) else sorted(list(session.drivers))
 
@@ -274,17 +274,16 @@ if compare_mode and drivers:
     d2 = st.sidebar.selectbox("Driver 2", drivers, index=1 if len(drivers) > 1 else 0, key="cmp_d2")
     compare_drivers = (d1, d2)
 
-# Store for modules that read it (telemetry overlay fix you asked earlier already supports this)
 st.session_state["compare_drivers"] = compare_drivers
 
-# Preload module selectbox keys where possible (no module edits needed if keys exist)
-# speedcomparison.py uses keys: "speed_driver_1", "speed_driver_2"
-# speedmap.py uses keys: 'speed_diff_driver_1', 'speed_diff_driver_2'
+# Preload keys for BOTH tabs (telemetry_ and compare_) so defaults appear already selected
 if compare_drivers:
-    st.session_state["speed_driver_1"] = compare_drivers[0]
-    st.session_state["speed_driver_2"] = compare_drivers[1]
-    st.session_state["speed_diff_driver_1"] = compare_drivers[0]
-    st.session_state["speed_diff_driver_2"] = compare_drivers[1]
+    for prefix in ("telemetry_", "compare_"):
+        st.session_state[f"{prefix}speed_driver_1"] = compare_drivers[0]
+        st.session_state[f"{prefix}speed_driver_2"] = compare_drivers[1]
+        st.session_state[f"{prefix}speed_diff_driver_1"] = compare_drivers[0]
+        st.session_state[f"{prefix}speed_diff_driver_2"] = compare_drivers[1]
+        st.session_state[f"{prefix}sector_driver_multiselect"] = list(compare_drivers)
 
 # -----------------------------
 # Load modules + collect show_ funcs
@@ -302,35 +301,31 @@ func_by_name = {f.__name__: f for f in all_funcs}
 
 # -----------------------------
 # Tabs
-#   - Add Compare tab when compare_mode enabled
 # -----------------------------
 tab_names = TAB_NAMES_BASE.copy()
 if compare_mode:
-    tab_names.insert(3, "Compare")  # put Compare between Telemetry and Strategy
-
+    tab_names.insert(3, "Compare")  # Overview, Lap Times, Telemetry, Compare, Strategy, Race, Advanced
 tabs = st.tabs(tab_names)
 
 # -----------------------------
-# Render: each tab gets functions that belong there AND are allowed
+# Rendering helpers
 # -----------------------------
-def render_function(func):
+def render_function(func, key_prefix: str, expanded: bool = False):
     fname = func.__name__
     title = nice_title(fname)
-
-    with st.expander(title, expanded=False):
+    with st.expander(title, expanded=expanded):
         if fname in EXPLAINERS:
             st.caption(EXPLAINERS[fname])
-
         try:
-            func(session)
+            run_module(func, session, key_prefix=key_prefix)
         except Exception as e:
             st.error(f"Module crashed: {fname}")
             st.exception(e)
 
-def funcs_for_tab(tname: str):
+def funcs_for_tab(tab_name: str):
     out = []
     for fname, group in FUNC_GROUP.items():
-        if group != tname:
+        if group != tab_name:
             continue
         if fname not in allowed:
             continue
@@ -338,39 +333,40 @@ def funcs_for_tab(tname: str):
             out.append(func_by_name[fname])
     return sorted(out, key=lambda f: nice_title(f.__name__))
 
+# -----------------------------
+# Render tabs
+#   Use unique key_prefix per tab to avoid duplicates
+# -----------------------------
 for tname, tab in zip(tab_names, tabs):
     with tab:
         if tname == "Compare":
             if not compare_drivers:
                 st.warning("Pick Driver 1 and Driver 2 in the sidebar to populate Compare.")
             else:
-                st.info(f"Compare: **{compare_drivers[0]} vs {compare_drivers[1]}** (preloaded into comparison tools).")
+                st.info(f"Compare: **{compare_drivers[0]} vs {compare_drivers[1]}** (inputs preloaded).")
 
-            # Render compare tools in a fixed order (only those that exist + allowed)
             for fname in COMPARE_FUNCS:
                 if fname in allowed and fname in func_by_name:
-                    render_function(func_by_name[fname])
-
+                    render_function(func_by_name[fname], key_prefix="compare_", expanded=True)
             continue
 
-        # Normal tabs
         funcs_here = funcs_for_tab(tname)
-
-        # Race tab should be empty for non-race sessions (by design)
         if not funcs_here:
             st.caption("No modules here for this session type.")
             continue
 
-        # Make Overview + Lap Times open by default (more readable)
-        expand_default = (tname in {"Overview", "Lap Times"})
+        # Open Overview + Lap Times by default
+        expanded_default = tname in {"Overview", "Lap Times"}
+
+        # Key prefix per tab (prevents duplicate widget keys)
+        key_prefix = {
+            "Overview": "overview_",
+            "Lap Times": "laps_",
+            "Telemetry": "telemetry_",
+            "Strategy": "strategy_",
+            "Race": "race_",
+            "Advanced": "adv_",
+        }.get(tname, "tab_")
+
         for func in funcs_here:
-            fname = func.__name__
-            title = nice_title(fname)
-            with st.expander(title, expanded=expand_default):
-                if fname in EXPLAINERS:
-                    st.caption(EXPLAINERS[fname])
-                try:
-                    func(session)
-                except Exception as e:
-                    st.error(f"Module crashed: {fname}")
-                    st.exception(e)
+            render_function(func, key_prefix=key_prefix, expanded=expanded_default)
