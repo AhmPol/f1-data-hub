@@ -1,28 +1,17 @@
-import streamlit as st
-from engine.data import init_fastf1_cache, list_events_for_year, list_sessions_for_event
 import os
+import streamlit as st
+from engine.data import init_fastf1_cache
+from app_state import top_bar_inputs, get_session_bundle
 
-st.set_page_config(page_title="F1 Telemetry Dashboard", layout="wide")
+st.set_page_config(page_title="F1 Data Hub", layout="wide")
 
 cache_path = os.path.join(os.getcwd(), ".fastf1_cache")
 init_fastf1_cache(cache_path)
-st.title("F1 Telemetry Dashboard")
 
+st.title("Formula Performance Dashboard")
 
-with st.sidebar:
-    st.header("Session Inputs")
+year, event, session_name, reload_now = top_bar_inputs()
+bundle = get_session_bundle(year, event, session_name, reload_now=reload_now)
 
-    year = st.selectbox("Season", options=list(range(2018, 2027)), index=7)  # default 2025-ish
-    events = list_events_for_year(year)
-    event_name = st.selectbox("Event", options=events)
-
-    sessions = list_sessions_for_event(year, event_name)
-    session_name = st.selectbox("Session", options=sessions)
-
-    st.divider()
-    st.caption("Use the left sidebar on each page for driver/lap choices.")
-
-st.info(
-    "Use the pages (left sidebar / multipage) to open Home, Lap Compare, Corner/Sector, and Long Runs."
-)
-
+st.caption(f"Loaded: {bundle['year']} • {bundle['event']} • {bundle['session_name']}")
+st.info("Use the pages on the left: Home, Lap Compare, Corner/Sector, Long Runs.")
