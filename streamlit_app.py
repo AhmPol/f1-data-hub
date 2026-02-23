@@ -6,8 +6,8 @@ st.set_page_config(page_title="F1 Telemetry Dashboard", layout="wide")
 
 cache_path = os.path.join(os.getcwd(), ".fastf1_cache")
 init_fastf1_cache(cache_path)
-
 st.title("F1 Telemetry Dashboard")
+
 
 with st.sidebar:
     st.header("Session Inputs")
@@ -25,3 +25,4 @@ with st.sidebar:
 st.info(
     "Use the pages (left sidebar / multipage) to open Home, Lap Compare, Corner/Sector, and Long Runs."
 )
+
