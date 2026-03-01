@@ -99,6 +99,9 @@ def get_testing_number(season: int, event_name: str) -> int | None:
     except ValueError:
         return None
 
+def _is_testing_event_name(event_name: str) -> bool:
+    s = str(event_name).lower()
+    return ("test" in s) or ("testing" in s) or ("pre-season" in s) or ("preseason" in s)
 
 def get_sessions_for_event(season: int, event_name: str) -> list[SessionItem]:
     """
@@ -108,6 +111,7 @@ def get_sessions_for_event(season: int, event_name: str) -> list[SessionItem]:
     - Testing: Practice 1/2/3 (typical) with dd/mm
     """
     schedule = get_event_schedule(season)
+    is_testing = _is_testing_event_name(event_name)
 
     # Determine event type from schedule
     row = schedule[schedule["EventName"].astype(str) == event_name].head(1)
@@ -117,6 +121,20 @@ def get_sessions_for_event(season: int, event_name: str) -> list[SessionItem]:
     else:
         fmt = str(row.iloc[0].get("EventFormat", "")).lower()
         event_type = "testing" if fmt == "testing" else "race"
+
+    is_testing = _is_testing_event_name(event_name)
+
+    if is_testing:
+        # testing sessions are 1/2/3
+        s1 = _ddmm(row.get("Session1Date"))
+        s2 = _ddmm(row.get("Session2Date"))
+        s3 = _ddmm(row.get("Session3Date"))
+    
+        return [
+            SessionItem(label=f"1 ({s1})", identifier=1),
+            SessionItem(label=f"2 ({s2})", identifier=2),
+            SessionItem(label=f"3 ({s3})", identifier=3),
+        ]
 
     if event_type == "testing":
         test_no = get_testing_number(season, event_name)
