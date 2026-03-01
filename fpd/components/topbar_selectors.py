@@ -65,7 +65,7 @@ def render_topbar() -> tuple[int | None, str | None, str | None]:
 
     # Store test_number in session_state if this is a testing event
     if selected_event and selected_event.type == "testing":
-        st.session_state[StateKeys.TEST_NUMBER] = selected_event.test_number
+        st.session_state[StateKeys.TEST_NUMBER] = getattr(selected_event, "test_number", None)
     else:
         st.session_state[StateKeys.TEST_NUMBER] = None
 
