@@ -9,6 +9,7 @@ class StateKeys:
     SEASON = "season"
     EVENT_NAME = "event_name"
     SESSION_NAME = "session_name"
+    TEST_NUMBER = "fpd_test_number"
 
     # Cached session identity (so we can reload only when needed)
     LOADED_SESSION_KEY = "loaded_session_key"
@@ -36,9 +37,10 @@ def init_state() -> None:
     """
     Initialize session_state keys once.
     """
-    for k, v in DEFAULTS.items():
-        if k not in st.session_state:
-            st.session_state[k] = v
+    st.session_state.setdefault(StateKeys.SEASON, None)
+    st.session_state.setdefault(StateKeys.EVENT_NAME, None)
+    st.session_state.setdefault(StateKeys.SESSION_NAME, None)
+    st.session_state.setdefault(StateKeys.TEST_NUMBER, None)
 
 
 def make_session_key(season: int, event_name: str, session_name: str) -> str:
