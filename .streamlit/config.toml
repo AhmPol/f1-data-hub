@@ -1,1 +1,28 @@
+[theme]
+base="dark"
+primaryColor="#E10600"          # F1 red
+backgroundColor="#0E1117"       # dark background
+secondaryBackgroundColor="#1C1F26"
+textColor="#FAFAFA"
+font="sans serif"
 
+[server]
+headless = true
+runOnSave = true
+maxUploadSize = 200
+enableXsrfProtection = true
+enableCORS = false
+
+[browser]
+gatherUsageStats = false
+
+[client]
+toolbarMode = "minimal"
+
+[runner]
+magicEnabled = true
+installTracer = false
+fixMatplotlib = true
+
+[logger]
+level = "info"
