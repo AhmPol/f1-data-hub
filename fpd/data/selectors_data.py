@@ -17,7 +17,7 @@ class EventItem:
     name: str
     type: EventType
     date_ddmm: str  # event date shown as dd/mm
-
+    test_number: int | None = None
 
 @dataclass(frozen=True)
 class SessionItem:
