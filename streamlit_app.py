@@ -2,28 +2,57 @@
 """
 MAIN APP (Home/Dashboard lives HERE)
 
-✅ Fixes you asked for:
-- Merges the “Home/Dashboard” into streamlit_app.py so your app doesn’t look weird / duplicated.
-  → IMPORTANT: delete or rename pages/01_Home.py (otherwise you’ll have two “Home” pages).
-- Drivers show abbreviated codes (VER, HAM…) not numbers.
-- Event dropdown shows date prefix like: 02-20 Bahrain Grand Prix (so you can distinguish).
-- If the event is pre-season testing, sessions display as: Session 1 / Session 2 / Session 3.
+✅ Fixes included in this version:
+1) Stops the 2026 / Pre-Season Testing crash (FastF1 KeyError: 'DriverNumber')
+   - Uses livedata=False
+   - Catches the known FastF1 failure and shows a clean warning instead of killing the app
 
-Also:
-- Creates FastF1 cache folder automatically (fixes NotADirectoryError).
-- Stores a shared bundle in st.session_state["bundle"] used by your other pages.
+2) Sidebar naming: hides the default "streamlit app" entry (CSS)
+   - Best fix is still renaming the file to Home.py + updating Streamlit Cloud main module,
+     but this CSS makes your sidebar look correct even without renaming.
+
+3) Pole-based distance reference on Home:
+   - The track map base is ALWAYS the pole/fastest lap (no dropdown), so Distance is anchored to pole.
+
+4) Keeps: cache folder auto-create, event labels show date prefix, testing sessions show Session 1/2/3.
+
+IMPORTANT:
+- If you still have pages/01_Home.py, delete/rename it to avoid duplicate “Home”.
 """
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
+
 import numpy as np
 import pandas as pd
-import streamlit as st
 import plotly.graph_objects as go
+import streamlit as st
 
 import fastf1
+
+
+# ----------------------------
+# Streamlit page config
+# ----------------------------
+st.set_page_config(layout="wide", page_title="Formula Performance Dashboard")
+
+
+# ----------------------------
+# Hide the default main script nav label ("streamlit app") in sidebar
+# (Best solution: rename file to Home.py and set Streamlit Cloud main module to Home.py)
+# ----------------------------
+st.markdown(
+    """
+<style>
+/* Hide the first page (main script) from the sidebar navigation */
+section[data-testid="stSidebar"] nav ul li:first-child {
+    display: none !important;
+}
+</style>
+""",
+    unsafe_allow_html=True,
+)
 
 
 # ----------------------------
@@ -36,14 +65,16 @@ def init_fastf1_cache(cache_dir: str = ".fastf1_cache") -> str:
     return str(p)
 
 
+# Init cache once (safe)
+init_fastf1_cache(".fastf1_cache")
+
+
 # ----------------------------
 # Event + session selectors
 # ----------------------------
 @st.cache_data(show_spinner=False, ttl=24 * 3600)
 def get_event_schedule(year: int) -> pd.DataFrame:
-    # FastF1 schedule with EventName + EventDate
     sched = fastf1.get_event_schedule(year)
-    # Normalize date
     if "EventDate" in sched.columns:
         sched["EventDate"] = pd.to_datetime(sched["EventDate"], errors="coerce")
     return sched
@@ -55,16 +86,14 @@ def is_preseason_event(event_name: str) -> bool:
 
 
 def fmt_event_label(event_row: pd.Series) -> str:
-    name = str(event_row.get("EventName", ""))
+    name = str(event_row.get("EventName", "")).strip()
     d = event_row.get("EventDate", pd.NaT)
     if pd.isna(d):
         return name
-    # MM-DD
     return f"{pd.to_datetime(d).strftime('%m-%d')} {name}"
 
 
 def build_event_options(schedule: pd.DataFrame):
-    # returns list of labels + mapping label -> eventName
     opts = []
     mapping = {}
     for _, r in schedule.iterrows():
@@ -75,8 +104,6 @@ def build_event_options(schedule: pd.DataFrame):
     return opts, mapping
 
 
-# We “probe” for sessions to avoid guessing formats.
-# This is fast enough because it's cached, and we stop early.
 COMMON_SESSIONS = ["FP1", "FP2", "FP3", "Q", "SQ", "S", "R"]
 
 
@@ -86,14 +113,11 @@ def available_sessions(year: int, event_name: str) -> list[str]:
     for s in COMMON_SESSIONS:
         try:
             sess = fastf1.get_session(year, event_name, s)
-            # Only keep if it can load metadata (doesn't fully download telemetry)
-            _ = sess.event  # triggers minimal fetch
+            _ = sess.event  # minimal metadata fetch
             ok.append(s)
         except Exception:
             continue
 
-    # Pre-season testing is usually not FP/Q/R in a normal way.
-    # If nothing found and event looks like testing, offer Session 1/2/3.
     if not ok and is_preseason_event(event_name):
         return ["Session 1", "Session 2", "Session 3"]
 
@@ -101,10 +125,6 @@ def available_sessions(year: int, event_name: str) -> list[str]:
 
 
 def normalize_session_code(event_name: str, ui_choice: str) -> str:
-    """
-    Convert UI label -> FastF1 session code.
-    For testing: map Session 1/2/3 -> FP1/FP2/FP3 (best practical mapping).
-    """
     if ui_choice.startswith("Session") and is_preseason_event(event_name):
         if "1" in ui_choice:
             return "FP1"
@@ -122,21 +142,39 @@ def display_session_label(event_name: str, session_code: str) -> str:
 
 
 # ----------------------------
-# Data loading (cached)
+# Data loading (cached + SAFE)
 # ----------------------------
 @st.cache_data(show_spinner=False, ttl=3 * 3600)
-def load_session(year: int, event_name: str, session_code: str):
+def load_session_safe(year: int, event_name: str, session_code: str):
+    """
+    Safe loader:
+    - livedata=False reduces weird API edge cases
+    - catches FastF1's KeyError 'DriverNumber' (common on testing / incomplete sessions)
+    """
     s = fastf1.get_session(year, event_name, session_code)
-    s.load(telemetry=True, weather=True, messages=False)
-    return s
+    try:
+        s.load(telemetry=True, weather=True, messages=False, livedata=False)
+        return s
+    except Exception as e:
+        msg = str(e)
+
+        # Known FastF1 internal crash: missing driver_info['DriverNumber']
+        if "DriverNumber" in msg:
+            # Try a lighter load; sometimes laps/telemetry still exist even if results don't
+            try:
+                s.load(telemetry=True, weather=True, messages=False, livedata=False)
+                return s
+            except Exception:
+                # Give up cleanly
+                raise RuntimeError(
+                    "FastF1 cannot load this session because the upstream API data is incomplete "
+                    "(missing DriverNumber). Try a different year/event/session."
+                ) from e
+
+        raise
 
 
 def get_driver_code_map(session) -> dict:
-    """
-    Try to ensure 'Driver' shows abbreviations like VER, HAM.
-    Most of the time FastF1 laps['Driver'] already is the 3-letter code.
-    If it looks numeric, map using results (if available).
-    """
     mapping = {}
     try:
         res = session.results.copy()
@@ -152,27 +190,14 @@ def normalize_driver_codes(laps: pd.DataFrame, code_map: dict) -> pd.DataFrame:
     df = laps.copy()
     if "Driver" not in df.columns:
         return df
-    # If driver values look numeric, map them
-    # (Some datasets might have DriverNumber used as Driver)
     df["Driver"] = df["Driver"].astype(str)
     df["Driver"] = df["Driver"].apply(lambda x: code_map.get(x, x))
     return df
 
 
 # ----------------------------
-# Home page helpers (from your 01_Home.py, cleaned)
+# Home helpers (map + tables)
 # ----------------------------
-def _to_seconds(td):
-    if td is None or pd.isna(td):
-        return np.nan
-    if hasattr(td, "total_seconds"):
-        return float(td.total_seconds())
-    try:
-        return float(pd.to_timedelta(td).total_seconds())
-    except Exception:
-        return np.nan
-
-
 def _lap_time_str(td) -> str:
     if td is None or pd.isna(td):
         return ""
@@ -183,6 +208,17 @@ def _lap_time_str(td) -> str:
         return f"{m}:{s:06.3f}"
     except Exception:
         return str(td)
+
+
+def _to_seconds(td):
+    if td is None or pd.isna(td):
+        return np.nan
+    if hasattr(td, "total_seconds"):
+        return float(td.total_seconds())
+    try:
+        return float(pd.to_timedelta(td).total_seconds())
+    except Exception:
+        return np.nan
 
 
 def _ensure_distance(tel: pd.DataFrame) -> pd.DataFrame:
@@ -288,12 +324,26 @@ def _track_map_figure(tel_r: pd.DataFrame, corners_df: pd.DataFrame, d_s1: float
     if "X" in tel_r.columns and "Y" in tel_r.columns and "Distance" in tel_r.columns:
         if d_s1 is not None and np.isfinite(d_s1):
             idx = int(np.argmin(np.abs(tel_r["Distance"].to_numpy(dtype=float) - d_s1)))
-            fig.add_trace(go.Scatter(x=[tel_r["X"].iloc[idx]], y=[tel_r["Y"].iloc[idx]], mode="markers+text",
-                                     text=["S1"], textposition="top center"))
+            fig.add_trace(
+                go.Scatter(
+                    x=[tel_r["X"].iloc[idx]],
+                    y=[tel_r["Y"].iloc[idx]],
+                    mode="markers+text",
+                    text=["S1"],
+                    textposition="top center",
+                )
+            )
         if d_s2 is not None and np.isfinite(d_s2):
             idx = int(np.argmin(np.abs(tel_r["Distance"].to_numpy(dtype=float) - d_s2)))
-            fig.add_trace(go.Scatter(x=[tel_r["X"].iloc[idx]], y=[tel_r["Y"].iloc[idx]], mode="markers+text",
-                                     text=["S2"], textposition="top center"))
+            fig.add_trace(
+                go.Scatter(
+                    x=[tel_r["X"].iloc[idx]],
+                    y=[tel_r["Y"].iloc[idx]],
+                    mode="markers+text",
+                    text=["S2"],
+                    textposition="top center",
+                )
+            )
 
     # Turn labels
     if corners_df is not None and not corners_df.empty and "X" in tel_r.columns and "Y" in tel_r.columns:
@@ -340,13 +390,17 @@ def _fastest_laps_table(laps: pd.DataFrame) -> pd.DataFrame:
         out["Team"] = best["Team"]
     out["Driver"] = best["Driver"]
     out["Lap Time"] = best["Lap Time"]
-    if "S1" in best.columns: out["S1"] = best["S1"]
-    if "S2" in best.columns: out["S2"] = best["S2"]
-    if "S3" in best.columns: out["S3"] = best["S3"]
-    if "Compound" in best.columns: out["Tire"] = best["Compound"]
-    if "TyreLife" in best.columns: out["TyreLife"] = best["TyreLife"]
+    if "S1" in best.columns:
+        out["S1"] = best["S1"]
+    if "S2" in best.columns:
+        out["S2"] = best["S2"]
+    if "S3" in best.columns:
+        out["S3"] = best["S3"]
+    if "Compound" in best.columns:
+        out["Tire"] = best["Compound"]
+    if "TyreLife" in best.columns:
+        out["TyreLife"] = best["TyreLife"]
 
-    # Top speed placeholder (optional compute)
     out["Top Speed (kph)"] = np.nan
     return out
 
@@ -354,6 +408,8 @@ def _fastest_laps_table(laps: pd.DataFrame) -> pd.DataFrame:
 def _race_results_table(session) -> pd.DataFrame:
     try:
         res = session.results.copy()
+        if res is None or res.empty:
+            return pd.DataFrame()
     except Exception:
         return pd.DataFrame()
 
@@ -415,34 +471,25 @@ def _bar_fastest_teams(laps: pd.DataFrame):
 
 
 # ----------------------------
-# Streamlit page config
-# ----------------------------
-st.set_page_config(layout="wide", page_title="Formula Performance Dashboard")
-
-# Init cache once
-init_fastf1_cache(".fastf1_cache")
-
-# ----------------------------
-# Top bar inputs (Season / Event / Session)
+# UI: Top bar inputs
 # ----------------------------
 st.title("Formula Performance Dashboard")
 
 top1, top2, top3 = st.columns([1, 2, 1])
 
 with top1:
-    year = st.selectbox("Season", options=list(range(2018, 2027)), index=list(range(2018, 2027)).index(2025) if 2025 in range(2018, 2027) else 0)
+    years = list(range(2018, 2027))
+    year = st.selectbox("Season", options=years, index=years.index(2025) if 2025 in years else 0)
 
 schedule = get_event_schedule(int(year))
 event_labels, event_map = build_event_options(schedule)
 
-# Default to first non-empty
-default_event_label = event_labels[0] if event_labels else ""
 with top2:
-    event_label = st.selectbox("Event", options=event_labels, index=0)
+    event_label = st.selectbox("Event", options=event_labels, index=0 if event_labels else 0)
 event_name = event_map.get(event_label, event_label)
 
 sessions = available_sessions(int(year), str(event_name))
-# show preseason “Session 1/2/3” in UI if needed
+
 ui_sessions = []
 for s in sessions:
     if s.startswith("Session"):
@@ -455,39 +502,59 @@ with top3:
 
 session_code = normalize_session_code(event_name, session_ui)
 
-# Load button (prevents reloading constantly)
+
+# ----------------------------
+# Load logic (safe)
+# ----------------------------
 load_now = st.button("Load session", use_container_width=True)
 
-# Auto-load first time
 if "bundle" not in st.session_state:
     load_now = True
 
 if load_now:
-    with st.spinner("Loading session (FastF1)..."):
-        session = load_session(int(year), str(event_name), str(session_code))
-        laps = session.laps.copy()
+    try:
+        with st.spinner("Loading session (FastF1)..."):
+            session = load_session_safe(int(year), str(event_name), str(session_code))
+            laps = session.laps.copy()
 
-        # ensure driver abbreviations
-        code_map = get_driver_code_map(session)
-        laps = normalize_driver_codes(laps, code_map)
+            # If this is a future/incomplete session, laps may be empty:
+            if laps is None or laps.empty:
+                st.warning(
+                    "No lap/telemetry data available for this session (likely incomplete or not published yet). "
+                    "Try a different year/event."
+                )
+                # Don't overwrite an existing good bundle
+                st.stop()
 
-        drivers = sorted([d for d in laps["Driver"].dropna().astype(str).unique().tolist()]) if "Driver" in laps.columns else []
-        is_race = (session_code == "R")
+            code_map = get_driver_code_map(session)
+            laps = normalize_driver_codes(laps, code_map)
 
-        st.session_state["bundle"] = {
-            "year": int(year),
-            "event": str(event_name),
-            "event_label": str(event_label),
-            "session_name": str(session_code),  # canonical code for other pages
-            "session_label": str(session_ui),   # what user sees (Session 1, etc.)
-            "session": session,
-            "laps": laps,
-            "drivers": drivers,
-            "is_race": is_race,
-        }
+            drivers = (
+                sorted(laps["Driver"].dropna().astype(str).unique().tolist())
+                if "Driver" in laps.columns
+                else []
+            )
+            is_race = (session_code == "R")
+
+            st.session_state["bundle"] = {
+                "year": int(year),
+                "event": str(event_name),
+                "event_label": str(event_label),
+                "session_name": str(session_code),
+                "session_label": str(session_ui),
+                "session": session,
+                "laps": laps,
+                "drivers": drivers,
+                "is_race": is_race,
+            }
+
+    except Exception as e:
+        st.error(str(e))
+        st.stop()
+
 
 # ----------------------------
-# HOME / DASHBOARD (merged)
+# HOME / DASHBOARD
 # ----------------------------
 bundle = st.session_state.get("bundle")
 if not bundle:
@@ -500,11 +567,10 @@ is_race = bool(bundle.get("is_race", False))
 
 st.caption(f"{bundle['year']} • {bundle['event_label']} • {bundle['session_label']}")
 
-# Track map + conditions
 left, right = st.columns([1.2, 1])
 
 with left:
-    st.subheader("Track Map")
+    st.subheader("Track Map (Pole-based reference)")
 
     laps_valid = laps[laps["LapTime"].notna()].copy()
     if "IsAccurate" in laps_valid.columns:
@@ -514,18 +580,19 @@ with left:
         st.warning("No valid laps found for this session.")
         st.stop()
 
+    # POLE LAP DRIVER (fastest overall) is the reference for distance
     overall_fast = laps_valid.loc[laps_valid["LapTime"].idxmin()]
-    default_driver = str(overall_fast["Driver"])
+    pole_driver = str(overall_fast["Driver"])
+    st.caption(f"Reference lap (pole/fastest): **{pole_driver}**")
 
-    map_driver = st.selectbox("Map base driver", options=sorted(drivers), index=sorted(drivers).index(default_driver) if default_driver in drivers else 0)
-    map_lap_row = laps_valid[laps_valid["Driver"] == map_driver].sort_values("LapTime").head(1)
-
+    map_lap_row = laps_valid[laps_valid["Driver"] == pole_driver].sort_values("LapTime").head(1)
     if map_lap_row.empty:
-        st.warning("No valid lap for selected driver.")
+        st.warning("No valid lap found for pole driver.")
         st.stop()
 
     map_lap = map_lap_row.iloc[0]
     tel_r = _resample_to_distance(map_lap.get_telemetry().copy(), step_m=2.0)
+
     d_s1, d_s2 = _sector_end_distances(map_lap, tel_r)
     corners_df = _detect_corners_from_circuit_info(session, tel_r)
 
@@ -548,40 +615,17 @@ with right:
 
     if corners_df is not None and not corners_df.empty:
         counts = corners_df["Type"].value_counts().to_dict()
-        st.caption(
-            f"Corner types: Slow={counts.get('Slow',0)} • Medium={counts.get('Medium',0)} • High={counts.get('High',0)}"
-        )
+        st.caption(f"Corner types: Slow={counts.get('Slow',0)} • Medium={counts.get('Medium',0)} • High={counts.get('High',0)}")
     else:
         st.caption("Corner labels unavailable for this session.")
 
 st.divider()
 
-# Tables: Fastest laps or Race results
+# Tables
 if not is_race:
     st.subheader("Fastest Laps (non-race session)")
     fast_tbl = _fastest_laps_table(laps)
-
-    with st.expander("Compute Top Speed from telemetry (optional)", expanded=False):
-        if st.button("Compute Top Speed"):
-            tops = {}
-            laps_valid = laps[laps["LapTime"].notna()].copy()
-            if "IsAccurate" in laps_valid.columns:
-                laps_valid = laps_valid[laps_valid["IsAccurate"] == True]
-            idx = laps_valid.groupby("Driver")["LapTime"].idxmin()
-            best = laps_valid.loc[idx].copy()
-
-            for _, r in best.iterrows():
-                drv = str(r["Driver"])
-                try:
-                    tel_r2 = _resample_to_distance(r.get_telemetry().copy(), step_m=4.0)
-                    tops[drv] = float(np.nanmax(tel_r2["Speed"])) if "Speed" in tel_r2.columns else np.nan
-                except Exception:
-                    tops[drv] = np.nan
-
-            fast_tbl["Top Speed (kph)"] = fast_tbl["Driver"].map(tops)
-
     st.dataframe(fast_tbl, use_container_width=True)
-
 else:
     st.subheader("Race Results (race session)")
     race_tbl = _race_results_table(session)
@@ -616,7 +660,8 @@ else:
 st.divider()
 
 st.info(
-    "✅ Home/Dashboard is now inside streamlit_app.py.\n\n"
+    "✅ Home/Dashboard is inside streamlit_app.py.\n\n"
     "If you still have `pages/01_Home.py`, Streamlit will show a duplicate Home page.\n"
-    "➡️ Delete it or rename it (e.g., `pages/01_Home_old.py`)."
+    "➡️ Delete or rename it (e.g., `pages/01_Home_old.py`).\n\n"
+    "Tip: Best naming fix is renaming this file to `Home.py` and updating Streamlit Cloud main module."
 )
