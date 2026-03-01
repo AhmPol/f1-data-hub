@@ -8,6 +8,7 @@ class StateKeys:
     # Session selection
     SEASON = "season"
     EVENT_NAME = "event_name"
+    EVENT_KEY = "fpd_event_key"
     SESSION_NAME = "session_name"
     TEST_NUMBER = "fpd_test_number"
 
