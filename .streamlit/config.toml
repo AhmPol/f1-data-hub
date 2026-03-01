@@ -18,6 +18,10 @@ gatherUsageStats = false
 
 [client]
 toolbarMode = "minimal"
+showSidebarNavigation = true
+
+[ui]
+hideTopBar = false
 
 [runner]
 magicEnabled = true
