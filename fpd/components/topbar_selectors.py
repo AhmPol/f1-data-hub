@@ -116,15 +116,17 @@ def _event_label_from_name(events: list[EventItem], name: str) -> str:
     return _event_label(events[0]) if events else ""
 
 
-def _session_label_from_identifier(sessions: list[SessionItem], identifier: str) -> str:
+def _session_label_from_identifier(sessions, identifier) -> str:
     """
-    Find the label matching an identifier (e.g., "R" -> "Race (dd/mm)").
-    If no match, fallback to first session label if present.
+    Given a list[SessionItem] and an identifier (str or int),
+    return the matching label for the selectbox default.
     """
-    identifier = (identifier or "").strip()
+    identifier_norm = str(identifier).strip()
+
     for s in sessions:
-        if s.identifier.strip() == identifier:
+        if str(s.identifier).strip() == identifier_norm:
             return s.label
+
     return sessions[0].label if sessions else ""
 
 
