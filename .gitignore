@@ -1,0 +1,22 @@
+# FastF1 cache
+data/cache/
+.fpd_cache/
+
+# Exported files
+data/exports/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Streamlit secrets
+.streamlit/secrets.toml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Virtual environment
+venv/
+.env/
