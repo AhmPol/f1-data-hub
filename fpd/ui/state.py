@@ -42,6 +42,7 @@ def init_state() -> None:
     st.session_state.setdefault(StateKeys.EVENT_NAME, None)
     st.session_state.setdefault(StateKeys.SESSION_NAME, None)
     st.session_state.setdefault(StateKeys.TEST_NUMBER, None)
+    st.session_state.setdefault(StateKeys.EVENT_KEY, None)
 
 
 def make_session_key(season: int, event_name: str, session_name: str) -> str:
