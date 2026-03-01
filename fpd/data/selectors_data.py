@@ -17,25 +17,33 @@ class EventItem:
     name: str
     type: EventType
     date_ddmm: str  # event date shown as dd/mm
-    test_number: int | None = None
+    test_number: int | None = None  # 1..N for testing events
+
 
 @dataclass(frozen=True)
 class SessionItem:
-    identifier: str          # what you pass to get_session/get_testing_session
-    label: str               # what you show in UI
-    date_ddmm: str           # dd/mm
-    event_type: EventType    # race/testing
-    test_number: int | None  # 1..N for testing; None for races
+    identifier: str | int          # what you pass to get_session/get_testing_session
+    label: str                     # what you show in UI
+    date_ddmm: str                 # dd/mm
+    event_type: EventType          # race/testing
+    test_number: int | None = None # 1..N for testing; None for races
 
 
 def _ddmm(dt) -> str:
-    if dt is None or (isinstance(dt, float) and pd.isna(dt)):
+    if dt is None:
         return "--/--"
     try:
-        # dt can be pandas Timestamp
-        return pd.to_datetime(dt).strftime("%d/%m")
+        ts = pd.to_datetime(dt, errors="coerce", utc=True)
+        if pd.isna(ts):
+            return "--/--"
+        return ts.strftime("%d/%m")
     except Exception:
         return "--/--"
+
+
+def _is_testing_event_name(event_name: str) -> bool:
+    s = str(event_name).lower()
+    return ("test" in s) or ("testing" in s) or ("pre-season" in s) or ("preseason" in s)
 
 
 @lru_cache(maxsize=16)
@@ -46,17 +54,40 @@ def get_available_seasons(start: int = 2018, end: int = 2026) -> list[int]:
 @lru_cache(maxsize=64)
 def get_event_schedule(season: int) -> pd.DataFrame:
     """
-    FastF1 schedule includes both race weekends and testing events.
+    Get schedule INCLUDING testing events when supported.
     """
-    return fastf1.get_event_schedule(season)
+    # Newer FastF1 supports include_testing=True
+    try:
+        return fastf1.get_event_schedule(season, include_testing=True)
+    except TypeError:
+        # Older FastF1
+        return fastf1.get_event_schedule(season)
 
 
 @lru_cache(maxsize=64)
 def get_events_for_season(season: int) -> list[EventItem]:
     """
     Returns events including testing. Shows date as dd/mm.
+    Also assigns test_number for testing events based on their order in the schedule.
     """
     schedule = get_event_schedule(season)
+    if schedule is None or schedule.empty:
+        return []
+
+    # Determine testing rows
+    def row_is_testing(r: pd.Series) -> bool:
+        fmt = str(r.get("EventFormat", "")).strip().lower()
+        if fmt == "testing":
+            return True
+        # fallback by name
+        return _is_testing_event_name(str(r.get("EventName", "")))
+
+    is_testing_mask = schedule.apply(row_is_testing, axis=1)
+    testing_schedule = schedule[is_testing_mask].copy()
+
+    # Assign test_number by schedule order (1-based)
+    testing_names = [str(x).strip() for x in testing_schedule.get("EventName", []).tolist()]
+    testing_num_map = {name: i + 1 for i, name in enumerate(testing_names) if name}
 
     events: list[EventItem] = []
     for _, row in schedule.iterrows():
@@ -64,165 +95,113 @@ def get_events_for_season(season: int) -> list[EventItem]:
         if not event_name:
             continue
 
-        fmt = str(row.get("EventFormat", "")).strip().lower()
-        event_type: EventType = "testing" if fmt == "testing" else "race"
+        is_testing = row_is_testing(row)
+        event_type: EventType = "testing" if is_testing else "race"
+        test_no = testing_num_map.get(event_name) if is_testing else None
 
-        # Usually "EventDate" exists; if not, fall back to "Session5Date"/etc.
+        # EventDate exists in schedule; fallback to Session1Date if missing
         event_date = row.get("EventDate", None)
+        if event_date is None:
+            event_date = row.get("Session1Date", None)
+
         events.append(
             EventItem(
                 name=event_name,
                 type=event_type,
                 date_ddmm=_ddmm(event_date),
+                test_number=test_no,
             )
         )
 
-    # keep order as schedule order (don’t sort alphabetically; schedule order is nicer)
     return events
 
 
 def get_testing_number(season: int, event_name: str) -> int | None:
     """
-    For testing events, FastF1 uses get_testing_session(year, test_number, session).
-    We derive test_number from schedule ordering among testing events (1-based).
+    Derive test_number among testing events (1-based) using schedule order.
     """
     schedule = get_event_schedule(season)
-    testing = schedule[schedule["EventFormat"].astype(str).str.lower() == "testing"].copy()
+    if schedule is None or schedule.empty:
+        return None
 
+    def row_is_testing(r: pd.Series) -> bool:
+        fmt = str(r.get("EventFormat", "")).strip().lower()
+        if fmt == "testing":
+            return True
+        return _is_testing_event_name(str(r.get("EventName", "")))
+
+    testing = schedule[schedule.apply(row_is_testing, axis=1)]
     if testing.empty:
         return None
 
-    # keep schedule order
-    testing_names = [str(x).strip() for x in testing["EventName"].tolist()]
+    names = [str(x).strip() for x in testing["EventName"].tolist()]
     try:
-        return testing_names.index(event_name.strip()) + 1
+        return names.index(event_name.strip()) + 1
     except ValueError:
         return None
 
-def _is_testing_event_name(event_name: str) -> bool:
-    s = str(event_name).lower()
-    return ("test" in s) or ("testing" in s) or ("pre-season" in s) or ("preseason" in s)
 
 def get_sessions_for_event(season: int, event_name: str) -> list[SessionItem]:
     """
-    Returns session identifiers + UI labels including dd/mm.
+    Returns sessions with dd/mm labels.
 
-    - Race weekend: FP1/FP2/FP3/Q/R (only if they exist)
-    - Testing: Practice 1/2/3 (typical) with dd/mm
+    ✅ Race weekend: uses schedule Session1..Session5 (whatever exists)
+    ✅ Testing: ALWAYS returns session numbers 1/2/3 (with dates) for FastF1.get_testing_session()
+       This is the critical fix so preseason testing does NOT show FP/Q/R.
     """
     schedule = get_event_schedule(season)
-    is_testing = _is_testing_event_name(event_name)
+    if schedule is None or schedule.empty or not event_name:
+        return []
 
-    # Determine event type from schedule
-    row = schedule[schedule["EventName"].astype(str) == event_name].head(1)
-    if row.empty:
-        # fallback: assume race
-        event_type: EventType = "race"
-    else:
-        fmt = str(row.iloc[0].get("EventFormat", "")).lower()
-        event_type = "testing" if fmt == "testing" else "race"
+    # Find schedule row
+    match = schedule[schedule["EventName"].astype(str).str.strip() == str(event_name).strip()]
+    if match.empty:
+        # fallback: try by partial match
+        match = schedule[schedule["EventName"].astype(str).str.contains(str(event_name), na=False)]
+    if match.empty:
+        return []
 
-    is_testing = _is_testing_event_name(event_name)
+    row = match.iloc[0]
+
+    fmt = str(row.get("EventFormat", "")).strip().lower()
+    is_testing = (fmt == "testing") or _is_testing_event_name(event_name)
+    event_type: EventType = "testing" if is_testing else "race"
 
     if is_testing:
-        # testing sessions are 1/2/3
-        s1 = _ddmm(row.get("Session1Date"))
-        s2 = _ddmm(row.get("Session2Date"))
-        s3 = _ddmm(row.get("Session3Date"))
-    
-        return [
-            SessionItem(label=f"1 ({s1})", identifier=1),
-            SessionItem(label=f"2 ({s2})", identifier=2),
-            SessionItem(label=f"3 ({s3})", identifier=3),
-        ]
-
-    if event_type == "testing":
         test_no = get_testing_number(season, event_name)
 
-        # Best effort: pull dates via FastF1 Event object if available
-        # If this fails, dates will show "--/--"
-        sessions: list[SessionItem] = []
-        try:
-            event = fastf1.get_event(season, event_name)
-            # event is a pandas Series with keys like 'Session1', 'Session1Date', etc.
-            for i in range(1, 6):
-                sname = event.get(f"Session{i}", None)
-                sdate = event.get(f"Session{i}Date", None)
-                if not sname:
-                    continue
-                sname = str(sname).strip()
+        # Testing sessions are numbered 1/2/3
+        s1 = _ddmm(row.get("Session1Date", None))
+        s2 = _ddmm(row.get("Session2Date", None))
+        s3 = _ddmm(row.get("Session3Date", None))
 
-                # Testing sessions are often named like "Practice 1", "Practice 2"...
-                identifier = sname
-                date_ddmm = _ddmm(sdate)
-                label = f"{sname} ({date_ddmm})"
+        return [
+            SessionItem(identifier=1, label=f"1 ({s1})", date_ddmm=s1, event_type="testing", test_number=test_no),
+            SessionItem(identifier=2, label=f"2 ({s2})", date_ddmm=s2, event_type="testing", test_number=test_no),
+            SessionItem(identifier=3, label=f"3 ({s3})", date_ddmm=s3, event_type="testing", test_number=test_no),
+        ]
 
-                sessions.append(
-                    SessionItem(
-                        identifier=identifier,
-                        label=label,
-                        date_ddmm=date_ddmm,
-                        event_type="testing",
-                        test_number=test_no,
-                    )
-                )
-
-        except Exception:
-            # fallback typical testing names (still shows dd/mm unknown)
-            for sname in ["Practice 1", "Practice 2", "Practice 3"]:
-                sessions.append(
-                    SessionItem(
-                        identifier=sname,
-                        label=f"{sname} (--/--)",
-                        date_ddmm="--/--",
-                        event_type="testing",
-                        test_number=test_no,
-                    )
-                )
-
-        return sessions
-
-    # race weekend
+    # Race weekend sessions (whatever exists in schedule row)
     sessions: list[SessionItem] = []
-    try:
-        event = fastf1.get_event(season, event_name)
+    for i in range(1, 6):
+        sname = row.get(f"Session{i}", None)
+        if sname is None or (isinstance(sname, float) and pd.isna(sname)):
+            continue
+        sname = str(sname).strip()
+        if not sname:
+            continue
 
-        # We only include sessions that exist in the event object.
-        # Typically: FP1 FP2 FP3 Q R (plus Sprint formats in some years)
-        for i in range(1, 6):
-            sname = event.get(f"Session{i}", None)
-            sdate = event.get(f"Session{i}Date", None)
-            if not sname:
-                continue
-            sname = str(sname).strip()
+        sdate = row.get(f"Session{i}Date", None)
+        ddmm = _ddmm(sdate)
 
-            # identifiers that FastF1 accepts often include abbreviations like FP1/FP2/Q/R
-            identifier = sname
-            date_ddmm = _ddmm(sdate)
-            label = f"{sname} ({date_ddmm})"
-
-            sessions.append(
-                SessionItem(
-                    identifier=identifier,
-                    label=label,
-                    date_ddmm=date_ddmm,
-                    event_type="race",
-                    test_number=None,
-                )
+        sessions.append(
+            SessionItem(
+                identifier=sname,
+                label=f"{sname} ({ddmm})",
+                date_ddmm=ddmm,
+                event_type=event_type,
+                test_number=None,
             )
+        )
 
-        return sessions
-
-    except Exception:
-        # last-resort fallback (no dates)
-        for s in ["FP1", "FP2", "FP3", "Q", "R"]:
-            sessions.append(
-                SessionItem(
-                    identifier=s,
-                    label=f"{s} (--/--)",
-                    date_ddmm="--/--",
-                    event_type="race",
-                    test_number=None,
-                )
-            )
-        return sessions
+    return sessions
