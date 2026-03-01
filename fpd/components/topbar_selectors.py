@@ -63,6 +63,12 @@ def render_topbar() -> tuple[int | None, str | None, str | None]:
     selected_event = event_by_label.get(selected_event_label)
     event_name = selected_event.name if selected_event else None
 
+    # Store test_number in session_state if this is a testing event
+    if selected_event and selected_event.type == "testing":
+        st.session_state[StateKeys.TEST_NUMBER] = selected_event.test_number
+    else:
+        st.session_state[StateKeys.TEST_NUMBER] = None
+
     # Sessions depend on event
     sessions: list[SessionItem] = get_sessions_for_event(season, event_name) if event_name else []
     session_labels = [s.label for s in sessions]
