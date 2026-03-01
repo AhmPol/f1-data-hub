@@ -22,44 +22,30 @@ def _load_testing_session_cached(season: int, test_number: int, session_identifi
     return session
 
 
-def load_session(season: int, event_name: str, session_identifier: str):
+def load_session(season: int, event_name: str, session_identifier: str | int, test_number: int | None = None):
     """
-    Loads either:
-      - race weekend session via fastf1.get_session(year, event, session)
-      - testing session via fastf1.get_testing_session(year, test_no, session)
-
-    Uses caching + state tracking.
+    Loads a session:
+      - Normal events: fastf1.get_session(season, event_name, session_identifier)
+      - Testing: fastf1.get_testing_session(season, test_number, session_number)
     """
-    if not season or not event_name or not session_identifier:
-        return None
-
-    event_name = event_name.strip()
-    session_identifier = session_identifier.strip()
-
-    # try race session first (works for normal weekends and sometimes for testing too)
     try:
-        session = _load_race_session_cached(season, event_name, session_identifier)
+        is_testing = "test" in str(event_name).lower()
 
-        if has_session_changed(season, event_name, session_identifier):
-            set_loaded_session(season, event_name, session_identifier)
+        if is_testing:
+            tn = test_number or st.session_state.get(StateKeys.TEST_NUMBER)
+            sn = int(session_identifier)  # 1/2/3
 
-        return session
-    except Exception:
-        pass
+            if not tn:
+                st.error("Testing event selected but test_number is missing.")
+                return None
 
-    # fallback: if it's testing, use get_testing_session
-    test_no = get_testing_number(season, event_name)
-    if test_no is None:
-        st.error("Could not load session (not found as race or testing event).")
-        return None
+            sess = fastf1.get_testing_session(season, int(tn), sn)
+        else:
+            sess = fastf1.get_session(season, event_name, session_identifier)
 
-    try:
-        session = _load_testing_session_cached(season, test_no, session_identifier)
+        sess.load()
+        return sess
 
-        if has_session_changed(season, event_name, session_identifier):
-            set_loaded_session(season, event_name, session_identifier)
-
-        return session
     except Exception as e:
-        st.error(f"Failed to load testing session: {e}")
+        st.error(f"Failed to load session: {e}")
         return None
