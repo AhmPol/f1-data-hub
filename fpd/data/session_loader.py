@@ -6,6 +6,7 @@ import streamlit as st
 
 from fpd.ui.state import has_session_changed, set_loaded_session
 from fpd.data.selectors_data import get_testing_number
+from fpd.ui.state import StateKeys
 
 
 @st.cache_resource(show_spinner=False)
