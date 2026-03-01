@@ -19,12 +19,21 @@ def validate_event(event_name: str | None) -> bool:
     return True
 
 
-def validate_session(session_identifier: str | None) -> bool:
-    if not session_identifier or not session_identifier.strip():
+def validate_session(session_identifier: str | int | None) -> bool:
+    """
+    Accepts session identifiers as str (FP1/Q/R) or int (testing 1/2/3).
+    """
+    if session_identifier is None:
         st.warning("Please select a session.")
         return False
-    return True
 
+    # Convert to string safely
+    s = str(session_identifier).strip()
+    if not s:
+        st.warning("Please select a session.")
+        return False
+
+    return True
 
 def validate_topbar(
     season: int | None,
